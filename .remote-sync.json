@@ -1,0 +1,21 @@
+{
+  "logger": {
+    "title": "Remote Sync"
+  },
+  "uploadOnSave": true,
+  "useAtomicWrites": false,
+  "deleteLocal": false,
+  "target": "winogrande",
+  "ignore": [
+    ".remote-sync.json",
+    ".git/**",
+    ".gitignore",
+    "data/*.lst",
+    "data/*.jsonl"
+  ],
+  "username": "andr0081",
+  "watch": [],
+  "transport": "scp",
+  "hostname": "ntu.nscc.sg",
+  "keyfile": "/Users/andrew/.ssh/andr0081_rsa"
+}
