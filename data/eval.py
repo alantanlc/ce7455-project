@@ -46,7 +46,7 @@ def main(args):
 
 
 if __name__ == '__main__':
-    #python eval.py --preds_file ./your_predictions.lst --labels_file ./dev-labels.lst
+    #python eval.py --preds_file ./your_predictions.lst --labels_file ./data/dev-labels.lst
     parser = argparse.ArgumentParser(
         description='Evaluate WinoGrande predictions')
     # Required Parameters

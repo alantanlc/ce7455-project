@@ -176,16 +176,6 @@ def train(args, train_dataset, model, tokenizer):
                 model.zero_grad()
                 global_step += 1
 
-                if args.local_rank in [-1, 0] and args.logging_steps > 0 and global_step % args.logging_steps == 0:
-                    # Log metrics
-                    if args.local_rank == -1 and args.evaluate_during_training:  # Only evaluate when single GPU otherwise metrics may not average well
-                        results = evaluate(args, model, tokenizer, processor, eval_split="dev")
-                        for key, value in results.items():
-                            tb_writer.add_scalar('eval_{}'.format(key), value, global_step)
-                    tb_writer.add_scalar('lr', scheduler.get_lr()[0], global_step)
-                    tb_writer.add_scalar('loss', (tr_loss - logging_loss)/args.logging_steps, global_step)
-                    logging_loss = tr_loss
-
                 if args.local_rank in [-1, 0] and args.save_steps > 0 and global_step % args.save_steps == 0:
                     # Save model checkpoint
                     output_dir = os.path.join(args.output_dir, 'checkpoint-{}'.format(global_step))
@@ -195,6 +185,19 @@ def train(args, train_dataset, model, tokenizer):
                     model_to_save.save_pretrained(output_dir)
                     torch.save(args, os.path.join(output_dir, 'training_args.bin'))
                     logger.info("Saving model checkpoint to %s", output_dir)
+                    
+                    
+                if args.local_rank in [-1, 0] and args.logging_steps > 0 and global_step % args.logging_steps == 0:
+                    # Log metrics
+                    if args.local_rank == -1 and args.evaluate_during_training:  # Only evaluate when single GPU otherwise metrics may not average well
+                        results = evaluate(args, model, tokenizer, processor, eval_split="dev", checkpoint_num=global_step)
+                        for key, value in results.items():
+                            tb_writer.add_scalar('eval_{}'.format(key), value, global_step)
+                    tb_writer.add_scalar('lr', scheduler.get_lr()[0], global_step)
+                    tb_writer.add_scalar('loss', (tr_loss - logging_loss)/args.logging_steps, global_step)
+                    logging_loss = tr_loss
+
+        
 
             if args.max_steps > 0 and global_step > args.max_steps:
                 epoch_iterator.close()
@@ -209,7 +212,7 @@ def train(args, train_dataset, model, tokenizer):
     return global_step, tr_loss / global_step
 
 
-def evaluate(args, model, tokenizer, processor, prefix="", eval_split=None):
+def evaluate(args, model, tokenizer, processor, prefix="", eval_split=None, checkpoint_num=0):
 
     eval_task_names = (args.task_name,)
     eval_outputs_dirs = (args.output_dir,)
@@ -277,8 +280,12 @@ def evaluate(args, model, tokenizer, processor, prefix="", eval_split=None):
             for k, v in result.items():
                 result_split[k + "_{}".format(eval_split)] = v
             results.update(result_split)
-
-            output_eval_file = os.path.join(eval_output_dir, "eval_results_{}.txt".format(eval_split))
+            if checkpoint_num > 0 :
+                output_eval_file = os.path.join(eval_output_dir,'checkpoint-{}'.format(checkpoint_num), "eval_results_{}.txt".format(eval_split))
+            else:
+                output_eval_file = os.path.join(eval_output_dir, "eval_results_{}.txt".format(eval_split))
+                
+                
             with open(output_eval_file, "w") as writer:
                 logger.info("***** Eval results {} on {} *****".format(prefix, eval_split))
                 for key in sorted(result_split.keys()):
@@ -286,7 +293,10 @@ def evaluate(args, model, tokenizer, processor, prefix="", eval_split=None):
                     writer.write("%s = %s\n" % (key, str(result_split[key])))
 
         # predictions
-        output_pred_file = os.path.join(eval_output_dir, "predictions_{}.lst".format(eval_split))
+        if checkpoint_num > 0 :
+            output_pred_file = os.path.join(eval_output_dir,'checkpoint-{}'.format(checkpoint_num),"predictions_{}.lst".format(eval_split))
+        else:
+            output_pred_file = os.path.join(eval_output_dir,"predictions_{}.lst".format(eval_split))
         with open(output_pred_file, "w") as writer:
             logger.info("***** Write predictions {} on {} *****".format(prefix, eval_split))
             for pred in preds:
@@ -608,4 +618,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    results = main()
+    print(results)
