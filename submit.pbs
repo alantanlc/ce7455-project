@@ -8,4 +8,4 @@
 cd ~
 module load singularity/latest
 cd winogrande
-singularity exec ~/scratch/pyt_winogrande.simg bash sample_training.sh
+singularity exec ~/scratch/pyt_winogrande.simg bash sample_training_gpt.sh xl gpt2_xl

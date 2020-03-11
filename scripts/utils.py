@@ -63,7 +63,12 @@ class MCInputExample(object):
         self.guid = guid
         self.options = options
         self.label = label
-
+        
+class QAInputExample(object):
+    def __init__(self, guid, input_seq, answer):
+        self.guid = guid
+        self.input_seq = input_seq
+        self.answer = answer
 
 class InputFeatures(object):
     """A single set of features of data."""
@@ -91,6 +96,13 @@ class MultipleChoiceFeatures(object):
         ]
         self.label = int(label)
 
+class QuestionAnswerFeatures(object):
+    def __init__(self, example_id, input_ids, input_mask, segment_ids, answer):
+        self.example_id = example_id
+        self.input_mask = input_mask
+        self.input_ids = input_ids
+        self.segment_ids= segment_ids
+        self.answer = answer
 
 class DataProcessor(object):
     """Base class for data converters for sequence classification data sets."""
@@ -188,9 +200,60 @@ class WinograndeProcessor(DataProcessor):
                 label=label
             )
             examples.append(mc_example)
-
         return examples
 
+class WinograndeProcessorForQA(DataProcessor):
+
+    def get_train_examples(self, data_dir, data_size='xs'):
+        return self._create_examples(
+            self._read_jsonl(os.path.join(data_dir, "train_"+data_size+".jsonl")))
+
+    def get_dev_examples(self, data_dir):
+        return self._create_examples(
+            self._read_jsonl(os.path.join(data_dir, "dev.jsonl")))
+
+    def get_test_examples(self, data_dir):
+        return self._create_examples(
+            self._read_jsonl(os.path.join(data_dir, "test.jsonl")))
+
+    def get_labels(self):
+        #copied over, leave it here first
+        return ["1", "2"]
+
+    def _create_examples(self, records):
+        examples = []
+        prompt_question='does the following statement make sense?'
+        for (i, record) in enumerate(records):
+            guid = record['qID']
+            sentence = record['sentence']
+            name1 = record['option1']
+            name2 = record['option2']
+            if not 'answer' in record:
+                # This is a dummy label for test prediction.
+                # test.jsonl doesn't include the `answer`.
+                label = "1"
+            else:
+                label = record['answer']
+            
+            conj = "_"
+            idx = sentence.index(conj)
+            context = sentence[:idx]
+            option_str = "_ " + sentence[idx + len(conj):].strip()
+
+            option1 = option_str.replace("_", name1)
+            option2 = option_str.replace("_", name2)
+            
+            #double the examples but training time should still be similar
+            for j, o in enumerate([option1, option2]):
+                qa_example = QAInputExample(
+                    guid=guid,
+                    input_seq=f'{prompt_question} {context}{o}' ,
+                    answer='yes' if label == str(j+1) else 'no'
+                    )
+
+                examples.append(qa_example)
+
+        return examples
 
 
 def convert_examples_to_features(examples,
@@ -414,6 +477,74 @@ def convert_multiple_choice_examples_to_features(examples, label_list, max_seq_l
         )
     return features
 
+def convert_qa_examples_to_features(examples, label_list, max_seq_length,
+                                                 tokenizer, output_mode,
+                                                 cls_token_at_end=True, pad_on_left=False,
+                                                 cls_token='[CLS]', sep_token='[SEP]', sep_token_extra=False, pad_token=-1,
+                                                 sequence_a_segment_id=0, sequence_b_segment_id=1,
+                                                 cls_token_segment_id=1, pad_token_segment_id=0,
+                                                 mask_padding_with_zero=True):
+    """ Loads a data file into a list of `InputBatch`s
+        `cls_token_at_end` define the location of the CLS token:
+            - False (Default, BERT/XLM pattern): [CLS] + A + [SEP] + B + [SEP]
+            - True (XLNet/GPT pattern): A + [SEP] + B + [SEP] + [CLS]
+        `cls_token_segment_id` define the segment id associated to the CLS token (0 for BERT, 2 for XLNet)
+    """
+
+    label_map = {label : i for i, label in enumerate(label_list)}
+
+    features = []
+    for (ex_index, example) in enumerate(examples):
+        if ex_index % 10000 == 0:
+            logger.info("Writing example %d of %d" % (ex_index, len(examples)))
+        option_features = []
+        
+        tokens = tokenizer.tokenize(example.input_seq, add_prefix_space=True)
+        tokens = ["<bos>"] + tokens + ["<eos>"]
+        #dont use cls yet
+        # if cls_token_at_end:
+        #     tokens = tokens + [cls_token]
+        # else:
+        #     tokens = [cls_token] + tokens
+        
+        input_ids = tokenizer.convert_tokens_to_ids(tokens)
+
+        # Zero-pad up to the sequence length.
+        padding_length = max_seq_length - len(input_ids)
+        input_mask = [1 if mask_padding_with_zero else 0] * len(input_ids)
+        input_mask += padding_length * [0]
+        input_ids = input_ids + ([pad_token] * padding_length)
+        segment_ids = [pad_token_segment_id] * len(input_ids)
+        
+        # The mask has 1 for real tokens and 0 for padding tokens. Only real
+        # tokens are attended to.
+    
+
+        assert len(input_ids) == max_seq_length
+
+
+        answer_tokens = tokenizer.encode(example.answer)
+
+        if ex_index < 5:
+            logger.info("*** Example ***")
+            logger.info(f"example_id: {example.guid}")
+            logger.info(f"input_seq: {example.input_seq}")
+            logger.info(f"input_ids: {input_ids}")
+            logger.info(f"input_mask: {input_mask}")
+            logger.info(f"answer: {example.answer}")
+            logger.info(f"answer_token: {answer_tokens}")
+        features.append(
+            QuestionAnswerFeatures(
+                example_id=example.guid,
+                input_mask=input_mask,
+                input_ids=input_ids,
+                segment_ids=segment_ids,
+                answer=answer_tokens
+            )
+        )
+    return features
+
+
 
 def _truncate_seq_pair(tokens_a, tokens_b, max_length):
     """Truncates a sequence pair in place to the maximum length."""
@@ -460,17 +591,38 @@ def compute_metrics(task_name, preds, labels):
     assert len(preds) == len(labels)
     if task_name == "winogrande":
         return {"acc": simple_accuracy(preds, labels)}
+    elif task_name == "winogrande_qa":
+        return {"acc": simple_accuracy(preds, labels)}
     else:
         raise KeyError(task_name)
 
 processors = {
     "winogrande": WinograndeProcessor,
+    "winogrande_qa": WinograndeProcessorForQA,
 }
 
 output_modes = {
     "winogrande": "multiple_choice",
+    "winogrande_qa": "question answering",
 }
 
 GLUE_TASKS_NUM_LABELS = {
     "winogrande": 2,
 }
+if __name__ == '__main__':
+    processor = WinograndeProcessorForQA()
+    examples = processor.get_train_examples('data/')
+    from transformers import GPT2Tokenizer
+    tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+    features = convert_qa_examples_to_features(
+        examples, processor.get_labels(), 128, tokenizer, "multiple_choice",
+        cls_token_at_end=bool('gpt2' in ['xlnet','gpt2']),            # xlnet has a cls token at the end
+        cls_token=tokenizer.cls_token,
+        sep_token=tokenizer.sep_token,
+        sep_token_extra=bool('gpt2' in ['roberta', "roberta_mc"]),
+        cls_token_segment_id=2 if 'gpt2' in ['xlnet'] else 0,
+        pad_on_left=bool('gpt2' in ['xlnet']),                 # pad on the left for xlnet
+        pad_token=-1,
+        pad_token_segment_id=4 if 'gpt2' in ['xlnet'] else 0
+    )
+    print('hi')
