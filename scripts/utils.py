@@ -222,7 +222,7 @@ class WinograndeProcessorForQA(DataProcessor):
 
     def _create_examples(self, records):
         examples = []
-        prompt_question='does the following statement make sense?'
+        prompt_question='Does this statement make sense?: '
         for (i, record) in enumerate(records):
             guid = record['qID']
             sentence = record['sentence']
@@ -483,7 +483,7 @@ def convert_qa_examples_to_features(examples, label_list, max_seq_length,
                                                  cls_token='[CLS]', sep_token='[SEP]', sep_token_extra=False, pad_token=-1,
                                                  sequence_a_segment_id=0, sequence_b_segment_id=1,
                                                  cls_token_segment_id=1, pad_token_segment_id=0,
-                                                 mask_padding_with_zero=True):
+                                                 mask_padding_with_zero=True, add_prefix_space=False):
     """ Loads a data file into a list of `InputBatch`s
         `cls_token_at_end` define the location of the CLS token:
             - False (Default, BERT/XLM pattern): [CLS] + A + [SEP] + B + [SEP]
@@ -497,9 +497,11 @@ def convert_qa_examples_to_features(examples, label_list, max_seq_length,
     for (ex_index, example) in enumerate(examples):
         if ex_index % 10000 == 0:
             logger.info("Writing example %d of %d" % (ex_index, len(examples)))
-        option_features = []
         
-        tokens = tokenizer.tokenize(example.input_seq, add_prefix_space=True)
+        if add_prefix_space:
+            tokens = tokenizer.tokenize(example.input_seq, add_prefix_space=add_prefix_space)
+        else:
+            tokens = tokenizer.tokenize(example.input_seq)
         tokens = ["<bos>"] + tokens + ["<eos>"]
         #dont use cls yet
         # if cls_token_at_end:
@@ -525,12 +527,13 @@ def convert_qa_examples_to_features(examples, label_list, max_seq_length,
 
         answer_tokens = tokenizer.encode(example.answer)
 
-        if ex_index < 5:
+        if ex_index < 1:
             logger.info("*** Example ***")
             logger.info(f"example_id: {example.guid}")
             logger.info(f"input_seq: {example.input_seq}")
             logger.info(f"input_ids: {input_ids}")
             logger.info(f"input_mask: {input_mask}")
+            logger.info(f"segment_ids: {segment_ids}")
             logger.info(f"answer: {example.answer}")
             logger.info(f"answer_token: {answer_tokens}")
         features.append(

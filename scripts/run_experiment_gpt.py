@@ -49,7 +49,8 @@ from transformers import (WEIGHTS_NAME, BertConfig,
                                   XLMTokenizer, XLNetConfig,
                                   XLNetForSequenceClassification,
                                   XLNetTokenizer,
-                                  GPT2Config, GPT2Tokenizer, GPT2LMHeadModel)
+                                  GPT2Config, GPT2Tokenizer, GPT2LMHeadModel,
+                                  T5Config, T5WithLMHeadModel, T5Tokenizer)
 
 from transformers import AdamW, get_linear_schedule_with_warmup
 
@@ -73,6 +74,7 @@ MODEL_CLASSES = {
     'roberta': (RobertaConfig, RobertaForSequenceClassification, RobertaTokenizer),
     'roberta_mc': (RobertaConfig, RobertaForMultipleChoice, RobertaTokenizer),
     'gpt2': (GPT2Config, GPT2LMHeadModel, GPT2Tokenizer),
+    't5': (T5Config, T5WithLMHeadModel, T5Tokenizer),
 }
 
 
@@ -150,6 +152,8 @@ def train(args, train_dataset, model, tokenizer):
     # set_seed(args)  # Added here for reproductibility (even between python 2 and 3)
     for _ in train_iterator:
         epoch_iterator = tqdm(train_dataloader, desc="Iteration", disable=args.local_rank not in [-1, 0], mininterval=10, ncols=100)
+        preds=None
+        out_label_ids = []
         for step, batch in enumerate(epoch_iterator):
             model.train()
             batch = tuple(t.to(args.device) for t in batch)
@@ -158,12 +162,28 @@ def train(args, train_dataset, model, tokenizer):
                       'attention_mask': batch[1],
                       'token_type_ids':    batch[2]}
             
+            if args.model_type == 't5':
+                #prolly have to refactor and move to convert_qa_examples_to_features ome time later..
+                inputs['encoder_input_ids'] = inputs.pop("input_ids")
+                inputs['encoder_attention_mask'] = inputs.pop("attention_mask")
+                inputs['decoder_input_ids'] = torch.ones([batch[0].shape[0], 1], dtype=torch.long).fill_(tokenizer.pad_token_id).to(args.device)
+                inputs['decoder_attention_mask'] = torch.ones((inputs['decoder_input_ids'].shape[0], 1), dtype=torch.long).to(args.device)
+                inputs.pop('token_type_ids')
+                    
             outputs = model(**inputs)
+                
+
+            # logits = outputs[0]
             logits = outputs[0][...,-1,:].squeeze()
             labels = batch[3].view(-1)
-
             loss = loss_fct(logits, labels)
-
+            
+            if preds is None:
+                preds = logits.detach().cpu().numpy()
+                out_label_ids = labels.detach().cpu().numpy()
+            else:
+                preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
+                out_label_ids = np.append(out_label_ids, labels.detach().cpu().numpy(), axis=0)
 
             if args.n_gpu > 1:
                 loss = loss.mean() # mean() to average on multi-gpu parallel training
@@ -211,6 +231,11 @@ def train(args, train_dataset, model, tokenizer):
             if args.max_steps > 0 and global_step > args.max_steps:
                 epoch_iterator.close()
                 break
+                
+        preds = np.argmax(preds, axis=-1)
+        result = compute_metrics('winogrande_qa', preds, out_label_ids)
+        logger.info(f'\tEpoch accuracy: {result}\t')
+        
         if args.max_steps > 0 and global_step > args.max_steps:
             train_iterator.close()
             break
@@ -263,6 +288,16 @@ def evaluate(args, model, tokenizer, processor, prefix="", eval_split=None, chec
                 inputs = {'input_ids':      batch[0],
                           'attention_mask': batch[1],
                           'token_type_ids':    batch[2]}
+                # print(tokenizer.decode(inputs['input_ids'][0]))
+                
+                if args.model_type == 't5':
+                    #prolly have to refactor and move to convert_qa_examples_to_features ome time later..
+                    inputs['encoder_input_ids'] = inputs.pop("input_ids")
+                    inputs['encoder_attention_mask'] = inputs.pop("attention_mask")
+                    inputs['decoder_input_ids'] = torch.ones([batch[0].shape[0], 1], dtype=torch.long).fill_(tokenizer.pad_token_id).to(args.device)
+                    inputs['decoder_attention_mask'] = torch.ones((inputs['decoder_input_ids'].shape[0], 1), dtype=torch.long).to(args.device)
+                    inputs.pop('token_type_ids')
+                    
                 outputs = model(**inputs)
                 logits = outputs[0][...,-1,:].squeeze()
                 labels = batch[3].view(-1)
@@ -330,11 +365,12 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False, eval_split="t
     else:
         data_cache_dir = args.data_cache_dir
 
-    cached_features_file = os.path.join(data_cache_dir, 'cached_{}_{}_{}_{}_{}'.format(
+    cached_features_file = os.path.join(data_cache_dir, 'cached_{}_{}_{}_{}_{}_{}'.format(
         eval_split,
         list(filter(None, args.model_name_or_path.split('/'))).pop(),
         str(args.max_seq_length),
         str(task),
+        str(args.model_type),
         str(args.data_size)))
 
     if os.path.exists(cached_features_file):
@@ -362,7 +398,8 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False, eval_split="t
             cls_token_segment_id=2 if args.model_type in ['xlnet'] else 0,
             pad_on_left=bool(args.model_type in ['xlnet']),                 # pad on the left for xlnet
             pad_token=tokenizer.convert_tokens_to_ids([tokenizer.pad_token])[0], #arbitary value since its gonna get ignored anyway
-            pad_token_segment_id=4 if args.model_type in ['xlnet'] else 0)
+            pad_token_segment_id=4 if args.model_type in ['xlnet'] else 0,
+            add_prefix_space=bool(args.model_type in ['gpt2', 'roberta', 'roberta_mc']))
         
         if args.local_rank in [-1, 0]:
             logger.info("Saving features into cached file %s", cached_features_file)
@@ -424,7 +461,7 @@ def main():
                         help="Batch size per GPU/CPU for evaluation.")
     parser.add_argument('--gradient_accumulation_steps', type=int, default=1,
                         help="Number of updates steps to accumulate before performing a backward/update pass.")
-    parser.add_argument("--learning_rate", default=5e-5, type=float,
+    parser.add_argument("--learning_rate", default=1e-5, type=float,
                         help="The initial learning rate for Adam.")
     parser.add_argument("--weight_decay", default=0.0, type=float,
                         help="Weight deay if we apply some.")

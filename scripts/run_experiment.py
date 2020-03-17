@@ -144,6 +144,8 @@ def train(args, train_dataset, model, tokenizer):
     train_iterator = trange(int(args.num_train_epochs), desc="Epoch", disable=args.local_rank not in [-1, 0])
     # set_seed(args)  # Added here for reproductibility (even between python 2 and 3)
     for _ in train_iterator:
+        preds = None
+        out_label_ids = None
         epoch_iterator = tqdm(train_dataloader, desc="Iteration", disable=args.local_rank not in [-1, 0], mininterval=10, ncols=100)
         for step, batch in enumerate(epoch_iterator):
             model.train()
@@ -155,6 +157,15 @@ def train(args, train_dataset, model, tokenizer):
             
             outputs = model(**inputs)
             loss = outputs[0]  # model outputs are always tuple in pytorch-transformers (see doc)
+            _, logits = outputs[:2]
+            
+            if preds is None:
+                preds = logits.detach().cpu().numpy()
+                out_label_ids = inputs['labels'].detach().cpu().numpy()
+            else:
+                preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
+                out_label_ids = np.append(out_label_ids, inputs['labels'].detach().cpu().numpy(), axis=0)
+
 
             if args.n_gpu > 1:
                 loss = loss.mean() # mean() to average on multi-gpu parallel training
@@ -206,6 +217,14 @@ def train(args, train_dataset, model, tokenizer):
             train_iterator.close()
             break
 
+        if args.output_mode == "classification" or args.output_mode == "multiple_choice":
+            preds = np.argmax(preds, axis=1)
+        elif args.output_mode == "regression":
+            preds = np.squeeze(preds)
+
+        result = compute_metrics('winogrande', preds, out_label_ids)
+        logger.info(f'\tEpoch accuracy: {result}\t')
+        
     if args.local_rank in [-1, 0]:
         tb_writer.close()
 
