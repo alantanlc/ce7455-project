@@ -21,12 +21,18 @@ class T5ForMultipleChoice(T5PreTrainedModel):
         
         num_choices = kwargs['encoder_input_ids'].shape[1]
         labels = kwargs.pop('labels')
+<<<<<<< HEAD
+=======
+        # print(kwargs['encoder_input_ids'].shape)
+        # print(kwargs['decoder_input_ids'].shape)
+>>>>>>> 3ca62440956020b95247bc35bf60cea15018961b
         kwargs['encoder_input_ids'] = kwargs['encoder_input_ids'].view(-1, kwargs['encoder_input_ids'].size(-1))
         kwargs['encoder_attention_mask'] = kwargs['encoder_attention_mask'].view(-1, kwargs['encoder_attention_mask'].size(-1))
         kwargs['decoder_input_ids'] = kwargs['decoder_input_ids'].view(-1, kwargs['decoder_input_ids'].size(-1))
         kwargs['decoder_attention_mask'] = kwargs['decoder_attention_mask'].view(-1, kwargs['decoder_attention_mask'].size(-1))
         decoder_outputs,encoder_outputs = self.t5(**kwargs)
         print(decoder_outputs.shape)
+<<<<<<< HEAD
         
         # logits = self.classifier(decoder_outputs)
         
@@ -38,6 +44,11 @@ class T5ForMultipleChoice(T5PreTrainedModel):
         
         #change back to (batch , num choices, seq len, dim)
         reshaped_logits = softmaxed_probs.view(-1, num_choices)
+=======
+
+        # logits = self.classifier(decoder_outputs)
+        reshaped_logits = logits.view(-1, num_choices)
+>>>>>>> 3ca62440956020b95247bc35bf60cea15018961b
 
         outputs = (reshaped_logits,) + outputs[2:]  # add hidden states and attention if they are here
         if labels is not None:
