@@ -13,7 +13,7 @@ CUDA_VISIBLE_DEVICES=0 python ./scripts/run_experiment.py \
 --data_dir ./data \
 --max_seq_length 80 \
 --per_gpu_eval_batch_size 4 \
---per_gpu_train_batch_size 8 \
+--per_gpu_train_batch_size 4 \
 --gradient_accumulation_steps 4 \
 --learning_rate 1e-5 \
 --num_train_epochs 8 \

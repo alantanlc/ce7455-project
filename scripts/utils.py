@@ -70,6 +70,7 @@ class QAInputExample(object):
         self.input_seq = input_seq
         self.answer = answer
 
+
 class InputFeatures(object):
     """A single set of features of data."""
 
@@ -95,6 +96,28 @@ class MultipleChoiceFeatures(object):
             for _, input_ids, input_mask, segment_ids in option_features
         ]
         self.label = int(label)
+
+class MultipleChoiceFeaturesForT5(object):
+    def __init__(self,
+                 example_id,
+                 option_features,
+                 label=None):
+        self.example_id = example_id
+        self.option_features = self.choices_features = [
+            {
+                'encoder_tokens': encoder_tokens,
+                'encoder_input_ids': encoder_input_ids,
+                'encoder_attention_mask': encoder_attention_mask,
+                'decoder_tokens': decoder_tokens,
+                'decoder_input_ids': decoder_input_ids,
+                'decoder_attention_mask': decoder_attention_mask
+            }
+            for encoder_tokens, encoder_input_ids, encoder_attention_mask, 
+            decoder_tokens, decoder_input_ids, decoder_attention_mask in option_features
+        ]
+        self.label = int(label)
+
+
 
 class QuestionAnswerFeatures(object):
     def __init__(self, example_id, input_ids, input_mask, segment_ids, answer):
@@ -168,8 +191,8 @@ class WinograndeProcessor(DataProcessor):
             guid = record['qID']
             sentence = record['sentence']
 
-            name1 = record['option1']
-            name2 = record['option2']
+            option1 = record['option1']
+            option2 = record['option2']
             if not 'answer' in record:
                 # This is a dummy label for test prediction.
                 # test.jsonl doesn't include the `answer`.
@@ -182,8 +205,8 @@ class WinograndeProcessor(DataProcessor):
             context = sentence[:idx]
             option_str = "_ " + sentence[idx + len(conj):].strip()
 
-            option1 = option_str.replace("_", name1)
-            option2 = option_str.replace("_", name2)
+            option1 = option_str.replace("_", option1)
+            option2 = option_str.replace("_", option2)
 
             mc_example = MCInputExample(
                 guid=guid,
@@ -223,11 +246,12 @@ class WinograndeProcessorForQA(DataProcessor):
     def _create_examples(self, records):
         examples = []
         prompt_question='Does this statement make sense?: '
+        prompt_answer='Answer:'
         for (i, record) in enumerate(records):
             guid = record['qID']
             sentence = record['sentence']
-            name1 = record['option1']
-            name2 = record['option2']
+            option1 = record['option1']
+            option2 = record['option2']
             if not 'answer' in record:
                 # This is a dummy label for test prediction.
                 # test.jsonl doesn't include the `answer`.
@@ -240,20 +264,21 @@ class WinograndeProcessorForQA(DataProcessor):
             context = sentence[:idx]
             option_str = "_ " + sentence[idx + len(conj):].strip()
 
-            option1 = option_str.replace("_", name1)
-            option2 = option_str.replace("_", name2)
+            option1 = option_str.replace("_", option1)
+            option2 = option_str.replace("_", option2)
             
             #double the examples but training time should still be similar
             for j, o in enumerate([option1, option2]):
                 qa_example = QAInputExample(
                     guid=guid,
-                    input_seq=f'{prompt_question} {context}{o}' ,
+                    input_seq=f'{prompt_question} {context}{o} {prompt_answer}' ,
                     answer='yes' if label == str(j+1) else 'no'
                     )
 
                 examples.append(qa_example)
 
         return examples
+
 
 
 def convert_examples_to_features(examples,
@@ -477,7 +502,85 @@ def convert_multiple_choice_examples_to_features(examples, label_list, max_seq_l
         )
     return features
 
-def convert_qa_examples_to_features(examples, label_list, max_seq_length,
+def convert_qa_examples_to_partial_scoring_features(examples, label_list, max_seq_length,
+                                                 tokenizer, output_mode,
+                                                 cls_token_at_end=True, pad_on_left=False,
+                                                 cls_token='[CLS]', sep_token='[SEP]', sep_token_extra=False, pad_token=-1,
+                                                 sequence_a_segment_id=0, sequence_b_segment_id=1,
+                                                 cls_token_segment_id=1, pad_token_segment_id=0,
+                                                 mask_padding_with_zero=True, add_prefix_space=False):
+    """ Loads a data file into a list of `InputBatch`s
+        `cls_token_at_end` define the location of the CLS token:
+            - False (Default, BERT/XLM pattern): [CLS] + A + [SEP] + B + [SEP]
+            - True (XLNet/GPT pattern): A + [SEP] + B + [SEP] + [CLS]
+        `cls_token_segment_id` define the segment id associated to the CLS token (0 for BERT, 2 for XLNet)
+    """
+
+    label_map = {label : i for i, label in enumerate(label_list)}
+    features = []
+    max_seq_length = int(max_seq_length/2)
+    for (ex_index, example) in enumerate(examples):
+        if ex_index % 10000 == 0:
+            logger.info("Writing example %d of %d" % (ex_index, len(examples)))
+        option_features = []
+        for option in example.options:
+            context_tokens = tokenizer.tokenize(option['segment1'] + tokenizer.eos_token)
+            option_tokens = tokenizer.tokenize(tokenizer.pad_token + option['segment2'] + tokenizer.eos_token)
+
+            #encoder inputs
+            encoder_tokens = context_tokens
+            encoder_input_ids = tokenizer.convert_tokens_to_ids(encoder_tokens)
+            encoder_attention_mask = [1 if mask_padding_with_zero else 0] * len(encoder_input_ids)
+            padding_length = max_seq_length - len(encoder_input_ids)
+            encoder_input_ids = encoder_input_ids + ([pad_token] * padding_length)
+            encoder_attention_mask = encoder_attention_mask + ([0 if mask_padding_with_zero else 1] * padding_length)
+
+
+            #decoder inputs = 
+            decoder_tokens = option_tokens
+            decoder_input_ids = tokenizer.convert_tokens_to_ids(decoder_tokens)
+            decoder_attention_mask = [1 if mask_padding_with_zero else 0] * len(decoder_input_ids)
+            padding_length = max_seq_length - len(decoder_input_ids)
+            decoder_input_ids = decoder_input_ids + ([pad_token] * padding_length)
+            decoder_attention_mask = decoder_attention_mask + ([0 if mask_padding_with_zero else 1] * padding_length)
+            
+            assert len(encoder_input_ids) == max_seq_length
+            assert len(encoder_attention_mask) == max_seq_length
+            assert len(decoder_input_ids) == max_seq_length
+            assert len(decoder_attention_mask) == max_seq_length
+
+            if output_mode != "multiple_choice":
+                raise KeyError(output_mode)
+
+            option_features.append((encoder_tokens, encoder_input_ids, encoder_attention_mask,decoder_tokens, decoder_input_ids, decoder_attention_mask))
+
+        label_id = label_map[example.label]
+
+        if ex_index < 5:
+            # print(str(encoder_tokens).encode('utf8'), str(encoder_input_ids).encode('utf8'), str(encoder_attention_mask).encode('utf8') ,str(decoder_tokens).encode('utf8'), str(decoder_input_ids).encode('utf8'), str(decoder_attention_mask).encode('utf8'), label_id, sep='\n')
+            logger.info("*** Example ***")
+            logger.info(f"example_id: {example.guid}")
+            for choice_idx, (encoder_tokens, encoder_input_ids, encoder_attention_mask, decoder_tokens, decoder_input_ids, decoder_attention_mask) in enumerate(
+                    option_features):
+                logger.info(f"choice: {choice_idx}")
+                logger.info(f"encoder_tokens: {' '.join(encoder_tokens)}")
+                logger.info(f"encoder_input_ids: {' '.join(map(str, encoder_input_ids))}")
+                logger.info(f"encoder_attention_mask: {' '.join(map(str, encoder_attention_mask))}")
+                logger.info(f"decoder_tokens: {' '.join(decoder_tokens)}")
+                logger.info(f"decoder_input_ids: {' '.join(map(str, decoder_input_ids))}")
+                logger.info(f"decoder_attention_mask: {' '.join(map(str, decoder_attention_mask))}")
+            logger.info(f"label: {label_id}")
+
+        features.append(
+            MultipleChoiceFeaturesForT5(
+                example_id=example.guid,
+                option_features=option_features,
+                label=label_id
+            )
+        )
+    return features
+
+def convert_qa_examples_to_yesno_features(examples, label_list, max_seq_length,
                                                  tokenizer, output_mode,
                                                  cls_token_at_end=True, pad_on_left=False,
                                                  cls_token='[CLS]', sep_token='[SEP]', sep_token_extra=False, pad_token=-1,
@@ -536,6 +639,8 @@ def convert_qa_examples_to_features(examples, label_list, max_seq_length,
             logger.info(f"segment_ids: {segment_ids}")
             logger.info(f"answer: {example.answer}")
             logger.info(f"answer_token: {answer_tokens}")
+            
+        # input()
         features.append(
             QuestionAnswerFeatures(
                 example_id=example.guid,
@@ -545,6 +650,16 @@ def convert_qa_examples_to_features(examples, label_list, max_seq_length,
                 answer=answer_tokens
             )
         )
+    
+    #!! equal number of yes/no but it leads to
+    # tmp = []
+    # for f in features:
+    #     tmp.append(f.answer[0])
+    # from collections import Counter    
+    # print(tmp)
+    # print(Counter(tmp))
+    # input()
+    
     return features
 
 
@@ -602,22 +717,24 @@ def compute_metrics(task_name, preds, labels):
 processors = {
     "winogrande": WinograndeProcessor,
     "winogrande_qa": WinograndeProcessorForQA,
+    "winogrande_ps": WinograndeProcessor,
 }
 
 output_modes = {
     "winogrande": "multiple_choice",
     "winogrande_qa": "question answering",
+    "winogrande_ps": "multiple_choice",
 }
 
 GLUE_TASKS_NUM_LABELS = {
     "winogrande": 2,
 }
 if __name__ == '__main__':
-    processor = WinograndeProcessorForQA()
+    processor = WinograndeProcessor()
     examples = processor.get_train_examples('data/')
-    from transformers import GPT2Tokenizer
-    tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
-    features = convert_qa_examples_to_features(
+    from transformers import T5Tokenizer
+    tokenizer = T5Tokenizer.from_pretrained('t5-small')
+    features = convert_qa_examples_to_partial_scoring_features(
         examples, processor.get_labels(), 128, tokenizer, "multiple_choice",
         cls_token_at_end=bool('gpt2' in ['xlnet','gpt2']),            # xlnet has a cls token at the end
         cls_token=tokenizer.cls_token,

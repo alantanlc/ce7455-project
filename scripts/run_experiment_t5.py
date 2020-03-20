@@ -42,40 +42,23 @@ from tensorboardX import SummaryWriter
 from tqdm import tqdm, trange
 import pathlib
 
-from transformers import (WEIGHTS_NAME, BertConfig,
-                                  BertForSequenceClassification, BertForMultipleChoice,
-                                  BertTokenizer,
-                                  RobertaConfig, RobertaForSequenceClassification, RobertaTokenizer,
-                                  XLMConfig, XLMForSequenceClassification,
-                                  XLMTokenizer, XLNetConfig,
-                                  XLNetForSequenceClassification,
-                                  XLNetTokenizer,
-                                  GPT2Config, GPT2Tokenizer, GPT2LMHeadModel,
-                                  T5Config, T5WithLMHeadModel, T5Tokenizer)
+from transformers import (WEIGHTS_NAME, T5Config, T5WithLMHeadModel, T5Tokenizer)
 
 from transformers import AdamW, get_linear_schedule_with_warmup
 
 #from scripts.adhoc_models import RobertaForMultipleChoice
-from roberta_mc import RobertaForMultipleChoice
+from T5_mc import T5ForMultipleChoice
 from utils import (compute_metrics, convert_examples_to_features,
                                 output_modes, processors,
-                                convert_multiple_choice_examples_to_features, convert_qa_examples_to_yesno_features)
+                                convert_qa_examples_to_partial_scoring_features)
 
 
 logger = logging.getLogger(__name__)
 
 # SPECIAL_TOKENS = {'bos_token':"<bos>", 'eos_token':"<eos>", 'pad_token':"<pad>"}
-ALL_MODELS = sum((tuple(conf.pretrained_config_archive_map.keys()) for conf in (BertConfig, XLNetConfig, XLMConfig, RobertaConfig)), ())
 
 MODEL_CLASSES = {
-    'bert': (BertConfig, BertForSequenceClassification, BertTokenizer),
-    'bert_mc': (BertConfig, BertForMultipleChoice, BertTokenizer),
-    'xlnet': (XLNetConfig, XLNetForSequenceClassification, XLNetTokenizer),
-    'xlm': (XLMConfig, XLMForSequenceClassification, XLMTokenizer),
-    'roberta': (RobertaConfig, RobertaForSequenceClassification, RobertaTokenizer),
-    'roberta_mc': (RobertaConfig, RobertaForMultipleChoice, RobertaTokenizer),
-    'gpt2': (GPT2Config, GPT2LMHeadModel, GPT2Tokenizer),
-    't5': (T5Config, T5WithLMHeadModel, T5Tokenizer),
+    't5': (T5Config, T5ForMultipleChoice, T5Tokenizer),
 }
 
 
@@ -159,25 +142,15 @@ def train(args, train_dataset, model, tokenizer):
             model.train()
             batch = tuple(t.to(args.device) for t in batch)
             #dont send labels in since they shift to the right in the library
-            inputs = {'input_ids':      batch[0],
-                      'attention_mask': batch[1],
-                      'token_type_ids':    batch[2]}
-            
-            if args.model_type == 't5':
-                #prolly have to refactor and move to convert_qa_examples_to_yesno_features ome time later..
-                inputs['encoder_input_ids'] = inputs.pop("input_ids")
-                inputs['encoder_attention_mask'] = inputs.pop("attention_mask")
-                inputs['decoder_input_ids'] = torch.ones([batch[0].shape[0], 1], dtype=torch.long).fill_(tokenizer.pad_token_id).to(args.device)
-                inputs['decoder_attention_mask'] = torch.ones((inputs['decoder_input_ids'].shape[0], 1), dtype=torch.long).to(args.device)
-                inputs.pop('token_type_ids')
-                    
+            inputs = {'encoder_input_ids':      batch[0],
+                      'encoder_attention_mask': batch[1],
+                      'decoder_input_ids':    batch[2],
+                      'decoder_attention_mask':  batch[3],
+                      'labels': batch[4]}
+                      
             outputs = model(**inputs)
                 
-
-            # logits = outputs[0]
-            logits = outputs[0][...,-1,:].squeeze()
-            labels = batch[3].view(-1)
-            loss = loss_fct(logits, labels)
+            logits = outputs[0]
             
             if preds is None:
                 preds = logits.detach().cpu().numpy()
@@ -292,7 +265,7 @@ def evaluate(args, model, tokenizer, processor, prefix="", eval_split=None, chec
                 # print(tokenizer.decode(inputs['input_ids'][0]))
                 
                 if args.model_type == 't5':
-                    #prolly have to refactor and move to convert_qa_examples_to_yesno_features ome time later..
+                    #prolly have to refactor and move to convert_qa_examples_to_features ome time later..
                     inputs['encoder_input_ids'] = inputs.pop("input_ids")
                     inputs['encoder_attention_mask'] = inputs.pop("attention_mask")
                     inputs['decoder_input_ids'] = torch.ones([batch[0].shape[0], 1], dtype=torch.long).fill_(tokenizer.pad_token_id).to(args.device)
@@ -393,7 +366,7 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False, eval_split="t
         else:
             raise Exception("eval_split should be among train / dev / test")
 
-        features = convert_qa_examples_to_yesno_features(
+        features = convert_qa_examples_to_partial_scoring_features(
             examples, label_list, args.max_seq_length, tokenizer, output_mode,
             cls_token_at_end=bool(args.model_type in ['xlnet','gpt2']),            # xlnet has a cls token at the end
             cls_token=tokenizer.cls_token,
@@ -411,11 +384,22 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False, eval_split="t
                 pathlib.Path(args.data_cache_dir).mkdir(parents=True, exist_ok=True)
             torch.save(features, cached_features_file)
     
-    all_input_ids = torch.tensor([f.input_ids for f in features], dtype=torch.long)
-    all_input_mask = torch.tensor([f.input_mask for f in features], dtype=torch.long)
-    all_segment_ids = torch.tensor([f.segment_ids for f in features], dtype=torch.long)
-    all_label_ids = torch.tensor([f.answer for f in features], dtype=torch.long)
-    dataset = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_label_ids)
+    
+    def _select_field(features, field):
+        return [
+            [
+                choice[field]
+                for choice in feature.choices_features
+            ]
+            for feature in features
+        ]
+    
+    all_encoder_input_ids = torch.tensor(_select_field(features, 'encoder_input_ids'), dtype=torch.long)
+    all_encoder_attention_mask = torch.tensor(_select_field(features, 'encoder_attention_mask'), dtype=torch.long)
+    all_decoder_input_ids = torch.tensor(_select_field(features, 'decoder_input_ids'), dtype=torch.long)
+    all_decoder_attention_mask = torch.tensor(_select_field(features, 'decoder_attention_mask'), dtype=torch.long)
+    all_label_ids = torch.tensor([f.label for f in features], dtype=torch.long)
+    dataset = TensorDataset(all_encoder_input_ids, all_encoder_attention_mask, all_decoder_input_ids, all_decoder_attention_mask,all_label_ids)
     return dataset
 
 
@@ -428,7 +412,7 @@ def main():
     parser.add_argument("--model_type", default=None, type=str, required=True,
                         help="Model type selected in the list: " + ", ".join(MODEL_CLASSES.keys()))
     parser.add_argument("--model_name_or_path", default=None, type=str, required=True,
-                        help="Path to pre-trained model or shortcut name selected in the list: " + ", ".join(ALL_MODELS))
+                        help="Path to pre-trained model or shortcut name")
     parser.add_argument("--task_name", default=None, type=str, required=True,
                         help="The name of the task to train selected in the list: " + ", ".join(processors.keys()))
     parser.add_argument("--output_dir", default=None, type=str, required=True,

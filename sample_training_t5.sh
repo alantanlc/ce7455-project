@@ -3,11 +3,11 @@ DATA_SIZE=$1
 # OUTPUT_DIR="./models/$2"
 OUTPUT_DIR="./models/test"
 
-CUDA_VISIBLE_DEVICES=0 python ./scripts/run_experiment_gpt.py \
+CUDA_VISIBLE_DEVICES=0 python ./scripts/run_experiment_t5.py \
 --model_type t5 \
 --model_name_or_path t5-base \
 --data_size $DATA_SIZE \
---task_name winogrande_qa \
+--task_name winogrande_ps \
 --do_eval \
 --do_lower_case \
 --data_dir ./data \
