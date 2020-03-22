@@ -13,47 +13,43 @@ class T5ForMultipleChoice(T5PreTrainedModel):
 
         self.t5 = T5WithLMHeadModel(config)
         #choose to use hidden states or softmaxed values for classification? currently softmaxed_values
-        # self.classifier = Linear(config.d_model, config.vocab_size, bias=False)
+        self.classifier = Linear(int((config.max_seq_len/2)-1), 1)
  
         self.init_weights()
 
     def forward(self, **kwargs):
         
-        num_choices = kwargs['encoder_input_ids'].shape[1]
+        
+        bs, num_choices, seq_len = kwargs['encoder_input_ids'].shape
         labels = kwargs.pop('labels')
-<<<<<<< HEAD
-=======
-        # print(kwargs['encoder_input_ids'].shape)
-        # print(kwargs['decoder_input_ids'].shape)
->>>>>>> 3ca62440956020b95247bc35bf60cea15018961b
         kwargs['encoder_input_ids'] = kwargs['encoder_input_ids'].view(-1, kwargs['encoder_input_ids'].size(-1))
         kwargs['encoder_attention_mask'] = kwargs['encoder_attention_mask'].view(-1, kwargs['encoder_attention_mask'].size(-1))
         kwargs['decoder_input_ids'] = kwargs['decoder_input_ids'].view(-1, kwargs['decoder_input_ids'].size(-1))
         kwargs['decoder_attention_mask'] = kwargs['decoder_attention_mask'].view(-1, kwargs['decoder_attention_mask'].size(-1))
         decoder_outputs,encoder_outputs = self.t5(**kwargs)
-        print(decoder_outputs.shape)
-<<<<<<< HEAD
         
-        # logits = self.classifier(decoder_outputs)
         
         #currently using probability -softmaxed values of each time step for prediction
+        
+        shift_labels = kwargs['decoder_input_ids'][...,1:]
         shift_logits = decoder_outputs[...,:-1,:]
-        softmaxed_probs = shift_logits.softmax()
+        softmaxed_probs = shift_logits.softmax(dim=-1)
         
-        #TAKE INDICIES OF EACH TIME STEP HERE !!TODO
+        #take indices of each time step
+        seq_probs = torch.zeros(bs*num_choices,seq_len-1).cuda()
+        for i in range(bs*num_choices):
+            seq_probs[i]= softmaxed_probs[i,torch.arange(seq_len-1),shift_labels[i]]
         
-        #change back to (batch , num choices, seq len, dim)
-        reshaped_logits = softmaxed_probs.view(-1, num_choices)
-=======
-
-        # logits = self.classifier(decoder_outputs)
-        reshaped_logits = logits.view(-1, num_choices)
->>>>>>> 3ca62440956020b95247bc35bf60cea15018961b
-
-        outputs = (reshaped_logits,) + outputs[2:]  # add hidden states and attention if they are here
+        seq_probs = self.classifier(seq_probs)
+        # seq_probs = seq_probs.prod(dim=-1)
+        reshaped_probs = seq_probs.view(bs, num_choices)
+        
+        outputs = (reshaped_probs, decoder_outputs, encoder_outputs)  # add hidden states and attention if they are here
         if labels is not None:
             loss_fct = CrossEntropyLoss()
-            loss = loss_fct(reshaped_logits, labels)
+            # print(reshaped_probs[0][0])
+            # print(labels)
+            loss = loss_fct(reshaped_probs, labels)
             outputs = (loss,) + outputs
 
         return outputs  # (loss), reshaped_logits, (hidden_states), (attentions)

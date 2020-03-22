@@ -11,7 +11,7 @@ CUDA_VISIBLE_DEVICES=0 python ./scripts/run_experiment_gpt.py \
 --do_eval \
 --do_lower_case \
 --data_dir ./data \
---max_seq_length 80 \
+--max_seq_length 40 \
 --per_gpu_eval_batch_size 2 \
 --per_gpu_train_batch_size 8 \
 --gradient_accumulation_steps 16 \
@@ -19,8 +19,8 @@ CUDA_VISIBLE_DEVICES=0 python ./scripts/run_experiment_gpt.py \
 --num_train_epochs 8 \
 --output_dir $OUTPUT_DIR \
 --do_train \
---logging_steps 2 \
---save_steps 2 \
+--logging_steps 500 \
+--save_steps 500 \
 --seed 42 \
 --data_cache_dir ./data/cache/ \
 --warmup_pct 0.1 \

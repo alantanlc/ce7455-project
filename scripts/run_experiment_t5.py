@@ -141,16 +141,16 @@ def train(args, train_dataset, model, tokenizer):
         for step, batch in enumerate(epoch_iterator):
             model.train()
             batch = tuple(t.to(args.device) for t in batch)
-            #dont send labels in since they shift to the right in the library
+            labels= batch[4]
             inputs = {'encoder_input_ids':      batch[0],
                       'encoder_attention_mask': batch[1],
                       'decoder_input_ids':    batch[2],
                       'decoder_attention_mask':  batch[3],
-                      'labels': batch[4]}
+                      'labels': labels}
                       
             outputs = model(**inputs)
                 
-            logits = outputs[0]
+            loss, logits = outputs[:2]
             
             if preds is None:
                 preds = logits.detach().cpu().numpy()
@@ -259,23 +259,16 @@ def evaluate(args, model, tokenizer, processor, prefix="", eval_split=None, chec
             batch = tuple(t.to(args.device) for t in batch)
 
             with torch.no_grad():
-                inputs = {'input_ids':      batch[0],
-                          'attention_mask': batch[1],
-                          'token_type_ids':    batch[2]}
-                # print(tokenizer.decode(inputs['input_ids'][0]))
+                labels= batch[4]
+                inputs = {'encoder_input_ids':      batch[0],
+                          'encoder_attention_mask': batch[1],
+                          'decoder_input_ids':    batch[2],
+                          'decoder_attention_mask':  batch[3],
+                          'labels': labels}
                 
-                if args.model_type == 't5':
-                    #prolly have to refactor and move to convert_qa_examples_to_features ome time later..
-                    inputs['encoder_input_ids'] = inputs.pop("input_ids")
-                    inputs['encoder_attention_mask'] = inputs.pop("attention_mask")
-                    inputs['decoder_input_ids'] = torch.ones([batch[0].shape[0], 1], dtype=torch.long).fill_(tokenizer.pad_token_id).to(args.device)
-                    inputs['decoder_attention_mask'] = torch.ones((inputs['decoder_input_ids'].shape[0], 1), dtype=torch.long).to(args.device)
-                    inputs.pop('token_type_ids')
                     
                 outputs = model(**inputs)
-                logits = outputs[0][...,-1,:].squeeze()
-                labels = batch[3].view(-1)
-                tmp_eval_loss = loss_fct(logits, labels)
+                tmp_eval_loss, logits = outputs[:2]
                 
                 eval_loss += tmp_eval_loss.mean().item()
             
@@ -290,7 +283,6 @@ def evaluate(args, model, tokenizer, processor, prefix="", eval_split=None, chec
                     out_label_ids = np.append(out_label_ids, labels.detach().cpu().numpy(), axis=0)
 
         eval_loss = eval_loss / nb_eval_steps
-        
         preds = np.argmax(preds, axis=1)
         if not eval_split == "test":
             result = compute_metrics(eval_task, preds, out_label_ids)
@@ -301,9 +293,7 @@ def evaluate(args, model, tokenizer, processor, prefix="", eval_split=None, chec
             if checkpoint_num > 0 :
                 output_eval_file = os.path.join(eval_output_dir,'checkpoint-{}'.format(checkpoint_num), "eval_results_{}.txt".format(eval_split))
             else:
-                output_eval_file = os.path.join(eval_output_dir, "eval_results_{}.txt".format(eval_split))
-                
-                
+                output_eval_file = os.path.join(eval_output_dir, "eval_results_{}.txt".format(eval_split))            
             with open(output_eval_file, "w") as writer:
                 logger.info("***** Eval results {} on {} *****".format(prefix, eval_split))
                 for key in sorted(result_split.keys()):
@@ -319,11 +309,12 @@ def evaluate(args, model, tokenizer, processor, prefix="", eval_split=None, chec
             logger.info("***** Write predictions {} on {} *****".format(prefix, eval_split))
             tmp = []
             for i, pred in enumerate(preds):
-                text = tokenizer.decode(eval_dataset[i][0], skip_special_tokens=True).encode('utf-8')
-                ans = tokenizer.decode(eval_dataset[i][3], skip_special_tokens=True).encode('utf-8')
-                pred_dec = tokenizer.decode([pred])
-                tmp.append(pred_dec)
-                writer.write(f'{text} \tprediction: {pred_dec} \tcorrect answer: {ans}\n')
+                context = tokenizer.decode(eval_dataset[i][0][0], skip_special_tokens=True).encode('utf-8')
+                op1 = tokenizer.decode(eval_dataset[i][2][0], skip_special_tokens=True).encode('utf-8')
+                op2 = tokenizer.decode(eval_dataset[i][2][1], skip_special_tokens=True).encode('utf-8')
+                label = eval_dataset[i][4]
+                tmp.append(pred)
+                writer.write(f'\n{context} \toption1: {op1} \toption2: {op2} \tpredicted: {pred} correct: {label}\n')
             writer.write(str(Counter(tmp)))
         if os.path.exists("/output/"):
             with open("/output/metrics.json", "w") as f:
@@ -425,7 +416,7 @@ def main():
     parser.add_argument("--config_name", default="", type=str,
                         help="Pretrained config name or path if not the same as model_name")
     parser.add_argument("--tokenizer_name", default="", type=str,
-                        help="Pretrained tokenizer name or path if not the same as model_name")
+                        help="Pretrained tokenizer name or path if not the same as model_name") 
     parser.add_argument("--cache_dir", default="", type=str,
                         help="Where do you want to store the pre-trained models downloaded from s3")
     parser.add_argument("--max_seq_length", default=128, type=int,
@@ -546,6 +537,7 @@ def main():
     )
     tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name if args.tokenizer_name else args.model_name_or_path, do_lower_case=args.do_lower_case)
     # tokenizer.add_special_tokens(SPECIAL_TOKENS)
+    config.max_seq_len = args.max_seq_length
     model = model_class.from_pretrained(args.model_name_or_path, from_tf=bool('.ckpt' in args.model_name_or_path), config=config)
     # model.resize_token_embeddings(len(tokenizer))
     if args.local_rank == 0:

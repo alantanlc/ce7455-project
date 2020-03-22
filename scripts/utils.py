@@ -711,6 +711,8 @@ def compute_metrics(task_name, preds, labels):
         return {"acc": simple_accuracy(preds, labels)}
     elif task_name == "winogrande_qa":
         return {"acc": simple_accuracy(preds, labels)}
+    elif task_name == "winogrande_ps":
+        return {"acc": simple_accuracy(preds, labels)}
     else:
         raise KeyError(task_name)
 
