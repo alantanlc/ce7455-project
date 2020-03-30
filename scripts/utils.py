@@ -245,8 +245,8 @@ class WinograndeProcessorForQA(DataProcessor):
 
     def _create_examples(self, records):
         examples = []
-        prompt_question='Does this statement make sense?: '
-        prompt_answer='Answer:'
+        prompt_question=''
+        prompt_answer=''
         for (i, record) in enumerate(records):
             guid = record['qID']
             sentence = record['sentence']
@@ -556,7 +556,7 @@ def convert_qa_examples_to_partial_scoring_features(examples, label_list, max_se
 
         label_id = label_map[example.label]
 
-        if ex_index < 5:
+        if ex_index < 1:
             # print(str(encoder_tokens).encode('utf8'), str(encoder_input_ids).encode('utf8'), str(encoder_attention_mask).encode('utf8') ,str(decoder_tokens).encode('utf8'), str(decoder_input_ids).encode('utf8'), str(decoder_attention_mask).encode('utf8'), label_id, sep='\n')
             logger.info("*** Example ***")
             logger.info(f"example_id: {example.guid}")

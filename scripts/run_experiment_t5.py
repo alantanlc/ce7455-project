@@ -31,6 +31,7 @@ import os
 import random
 import math
 from collections import Counter 
+from torch.utils.checkpoint import checkpoint
 
 import numpy as np
 import torch
@@ -141,14 +142,27 @@ def train(args, train_dataset, model, tokenizer):
         for step, batch in enumerate(epoch_iterator):
             model.train()
             batch = tuple(t.to(args.device) for t in batch)
+            # assert(not torch.isnan(batch[0]).any())
+            # assert(not torch.isnan(batch[1]).any())
+            # assert(not torch.isnan(batch[2]).any())
+            # assert(not torch.isnan(batch[3]).any())
+            # assert(not torch.isnan(torch.tensor(tokenizer.eos_token_id)))
+            # assert(not torch.isinf(batch[0]).any())
+            # assert(not torch.isinf(batch[1]).any())
+            # assert(not torch.isinf(batch[2]).any())
+            # assert(not torch.isinf(batch[3]).any())
+            # assert(not torch.isinf(torch.tensor(tokenizer.eos_token_id)))
+            
             labels= batch[4]
             inputs = {'encoder_input_ids':      batch[0],
                       'encoder_attention_mask': batch[1],
                       'decoder_input_ids':    batch[2],
                       'decoder_attention_mask':  batch[3],
-                      'labels': labels}
+                      'labels': labels,
+                      'eos_token_id': tokenizer.eos_token_id}
                       
-            outputs = model(**inputs)
+            # outputs = model(**inputs)
+            outputs = checkpoint(model, inputs)
                 
             loss, logits = outputs[:2]
             
@@ -169,9 +183,10 @@ def train(args, train_dataset, model, tokenizer):
                     scaled_loss.backward()
                 torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), args.max_grad_norm)
             else:
-                loss.backward()
+                # loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
 
+            # print('batch loss:', loss.item(),)
             tr_loss += loss.item()
             if (step + 1) % args.gradient_accumulation_steps == 0:
                 optimizer.step()
@@ -260,14 +275,25 @@ def evaluate(args, model, tokenizer, processor, prefix="", eval_split=None, chec
 
             with torch.no_grad():
                 labels= batch[4]
+                # assert(not torch.isnan(batch[0]).any())
+                # assert(not torch.isnan(batch[1]).any())
+                # assert(not torch.isnan(batch[2]).any())
+                # assert(not torch.isnan(batch[3]).any())
+                # assert(not torch.isnan(torch.tensor(tokenizer.eos_token_id)))
+                # assert(not torch.isinf(batch[0]).any())
+                # assert(not torch.isinf(batch[1]).any())
+                # assert(not torch.isinf(batch[2]).any())
+                # assert(not torch.isinf(batch[3]).any())
+                assert(not torch.isinf(torch.tensor(tokenizer.eos_token_id)))
                 inputs = {'encoder_input_ids':      batch[0],
                           'encoder_attention_mask': batch[1],
                           'decoder_input_ids':    batch[2],
                           'decoder_attention_mask':  batch[3],
-                          'labels': labels}
+                          'labels': labels,
+                          'eos_token_id': tokenizer.eos_token_id}
                 
                     
-                outputs = model(**inputs)
+                outputs = checkpoint(model, inputs)
                 tmp_eval_loss, logits = outputs[:2]
                 
                 eval_loss += tmp_eval_loss.mean().item()

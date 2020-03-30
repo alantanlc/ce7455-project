@@ -17,11 +17,13 @@ class T5ForMultipleChoice(T5PreTrainedModel):
  
         self.init_weights()
 
-    def forward(self, **kwargs):
+    def forward(self, kwargs):
         
         
+
         bs, num_choices, seq_len = kwargs['encoder_input_ids'].shape
         labels = kwargs.pop('labels')
+        eos_token_id = kwargs.pop('eos_token_id')
         kwargs['encoder_input_ids'] = kwargs['encoder_input_ids'].view(-1, kwargs['encoder_input_ids'].size(-1))
         kwargs['encoder_attention_mask'] = kwargs['encoder_attention_mask'].view(-1, kwargs['encoder_attention_mask'].size(-1))
         kwargs['decoder_input_ids'] = kwargs['decoder_input_ids'].view(-1, kwargs['decoder_input_ids'].size(-1))
@@ -32,14 +34,15 @@ class T5ForMultipleChoice(T5PreTrainedModel):
         #currently using probability -softmaxed values of each time step for prediction
         
         shift_labels = kwargs['decoder_input_ids'][...,1:]
+        eos_idxs = (shift_labels==eos_token_id).nonzero()
         shift_logits = decoder_outputs[...,:-1,:]
         softmaxed_probs = shift_logits.softmax(dim=-1)
         
         #take indices of each time step
-        seq_probs = torch.zeros(bs*num_choices,seq_len-1).cuda()
-        for i in range(bs*num_choices):
-            seq_probs[i]= softmaxed_probs[i,torch.arange(seq_len-1),shift_labels[i]]
-        
+        seq_probs = softmaxed_probs[torch.arange(bs*num_choices).unsqueeze(1),torch.arange(seq_len-1),shift_labels]
+        for eos_idx in eos_idxs:
+            seq_probs[eos_idx[0],eos_idx[1]+1:] = 0.0
+            
         seq_probs = self.classifier(seq_probs)
         # seq_probs = seq_probs.prod(dim=-1)
         reshaped_probs = seq_probs.view(bs, num_choices)
