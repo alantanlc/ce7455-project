@@ -31,7 +31,7 @@ import os
 import random
 import math
 from collections import Counter 
-from torch.utils.checkpoint import checkpoint
+from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 
 import numpy as np
 import torch
@@ -43,7 +43,7 @@ from tensorboardX import SummaryWriter
 from tqdm import tqdm, trange
 import pathlib
 
-from transformers import (WEIGHTS_NAME, T5Config, T5WithLMHeadModel, T5Tokenizer)
+from transformers import (WEIGHTS_NAME, T5Config, T5ForConditionalGeneration, T5Tokenizer)
 
 from transformers import AdamW, get_linear_schedule_with_warmup
 
@@ -139,55 +139,51 @@ def train(args, train_dataset, model, tokenizer):
         epoch_iterator = tqdm(train_dataloader, desc="Iteration", disable=args.local_rank not in [-1, 0], mininterval=10, ncols=100)
         preds=None
         out_label_ids = []
+        num_batch = len(epoch_iterator)
         for step, batch in enumerate(epoch_iterator):
+            epoch_loss = {'loss':0.0, 'batch':0} 
             model.train()
             batch = tuple(t.to(args.device) for t in batch)
-            # assert(not torch.isnan(batch[0]).any())
-            # assert(not torch.isnan(batch[1]).any())
-            # assert(not torch.isnan(batch[2]).any())
-            # assert(not torch.isnan(batch[3]).any())
-            # assert(not torch.isnan(torch.tensor(tokenizer.eos_token_id)))
-            # assert(not torch.isinf(batch[0]).any())
-            # assert(not torch.isinf(batch[1]).any())
-            # assert(not torch.isinf(batch[2]).any())
-            # assert(not torch.isinf(batch[3]).any())
-            # assert(not torch.isinf(torch.tensor(tokenizer.eos_token_id)))
             
-            labels= batch[4]
-            inputs = {'encoder_input_ids':      batch[0],
-                      'encoder_attention_mask': batch[1],
-                      'decoder_input_ids':    batch[2],
-                      'decoder_attention_mask':  batch[3],
-                      'labels': labels,
+            inputs = {'input_ids':      batch[0][torch.arange(batch[2].shape[0]),batch[4],:],
+                      'attention_mask': batch[1][torch.arange(batch[2].shape[0]),batch[4],:],
+                      'decoder_attention_mask': batch[3][torch.arange(batch[2].shape[0]),batch[4],:],
+                      'lm_labels':    batch[2][torch.arange(batch[2].shape[0]),batch[4],:],
                       'eos_token_id': tokenizer.eos_token_id}
-                      
-            # outputs = model(**inputs)
-            outputs = checkpoint(model, inputs)
+            
+            if args.save_mem:          
+                outputs = checkpoint(model, inputs)
+            else:
+                outputs = model(inputs)
+                
                 
             loss, logits = outputs[:2]
             
-            if preds is None:
-                preds = logits.detach().cpu().numpy()
-                out_label_ids = labels.detach().cpu().numpy()
-            else:
-                preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
-                out_label_ids = np.append(out_label_ids, labels.detach().cpu().numpy(), axis=0)
+            # if preds is None:
+            #     preds = logits.detach().cpu().numpy()
+            #     out_label_ids = labels.detach().cpu().numpy()
+            # else:
+            #     preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
+            #     out_label_ids = np.append(out_label_ids, labels.detach().cpu().numpy(), axis=0)
 
             if args.n_gpu > 1:
                 loss = loss.mean() # mean() to average on multi-gpu parallel training
             if args.gradient_accumulation_steps > 1:
                 loss = loss / args.gradient_accumulation_steps
-
+            
             if args.fp16:
                 with amp.scale_loss(loss, optimizer) as scaled_loss:
                     scaled_loss.backward()
                 torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), args.max_grad_norm)
             else:
-                # loss.backward()
+                loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
 
             # print('batch loss:', loss.item(),)
             tr_loss += loss.item()
+            epoch_loss['loss'] += loss.item()
+            epoch_loss['batch'] += 1
+            # print(loss.item())
             if (step + 1) % args.gradient_accumulation_steps == 0:
                 optimizer.step()
                 scheduler.step()  # Update learning rate schedule
@@ -221,9 +217,10 @@ def train(args, train_dataset, model, tokenizer):
                 epoch_iterator.close()
                 break
                 
-        preds = np.argmax(preds, axis=-1)
-        result = compute_metrics('winogrande_qa', preds, out_label_ids)
-        logger.info(f'\tEpoch accuracy: {result}\t')
+        # preds = np.argmax(preds, axis=-1)
+        # result = compute_metrics('winogrande_qa', preds, out_label_ids)
+        avg_loss = epoch_loss['loss']/epoch_loss['batch']
+        logger.info(f'\tEpoch loss: {avg_loss}\t')
         
         if args.max_steps > 0 and global_step > args.max_steps:
             train_iterator.close()
@@ -275,25 +272,19 @@ def evaluate(args, model, tokenizer, processor, prefix="", eval_split=None, chec
 
             with torch.no_grad():
                 labels= batch[4]
-                # assert(not torch.isnan(batch[0]).any())
-                # assert(not torch.isnan(batch[1]).any())
-                # assert(not torch.isnan(batch[2]).any())
-                # assert(not torch.isnan(batch[3]).any())
-                # assert(not torch.isnan(torch.tensor(tokenizer.eos_token_id)))
-                # assert(not torch.isinf(batch[0]).any())
-                # assert(not torch.isinf(batch[1]).any())
-                # assert(not torch.isinf(batch[2]).any())
-                # assert(not torch.isinf(batch[3]).any())
-                assert(not torch.isinf(torch.tensor(tokenizer.eos_token_id)))
-                inputs = {'encoder_input_ids':      batch[0],
-                          'encoder_attention_mask': batch[1],
+                inputs = {'input_ids':      batch[0],
+                          'attention_mask': batch[1],
                           'decoder_input_ids':    batch[2],
                           'decoder_attention_mask':  batch[3],
                           'labels': labels,
                           'eos_token_id': tokenizer.eos_token_id}
                 
                     
-                outputs = checkpoint(model, inputs)
+                if args.save_mem:          
+                    outputs = checkpoint(model, inputs)
+                else:
+                    outputs = model(inputs)
+                    
                 tmp_eval_loss, logits = outputs[:2]
                 
                 eval_loss += tmp_eval_loss.mean().item()
@@ -342,6 +333,7 @@ def evaluate(args, model, tokenizer, processor, prefix="", eval_split=None, chec
                 tmp.append(pred)
                 writer.write(f'\n{context} \toption1: {op1} \toption2: {op2} \tpredicted: {pred} correct: {label}\n')
             writer.write(str(Counter(tmp)))
+            writer.write("%s = %s\n" % (key, str(result_split[key])))
         if os.path.exists("/output/"):
             with open("/output/metrics.json", "w") as f:
                 f.write(json.dumps(results))
@@ -480,7 +472,7 @@ def main():
                         help="If > 0: set total number of training steps to perform. Override num_train_epochs.")
     parser.add_argument("--warmup_steps", default=0, type=int,
                         help="Linear warmup over warmup_steps.")
-    parser.add_argument("--warmup_pct", default=None, type=float,
+    parser.add_argument("--warmup_pct", default=0.1, type=float,
                         help="Linear warmup over warmup_pct*total_steps.")
 
     parser.add_argument('--logging_steps', type=int, default=50,
@@ -497,7 +489,9 @@ def main():
                         help="Overwrite the cached training and evaluation sets")
     parser.add_argument('--seed', type=int, default=42,
                         help="random seed for initialization")
-
+                        
+    parser.add_argument('--save_mem', action='store_true',
+                        help="trade mem for compute")
     parser.add_argument('--fp16', action='store_true',
                         help="Whether to use 16-bit (mixed) precision (through NVIDIA apex) instead of 32-bit")
     parser.add_argument('--fp16_opt_level', type=str, default='O1',

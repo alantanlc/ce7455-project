@@ -524,8 +524,8 @@ def convert_qa_examples_to_partial_scoring_features(examples, label_list, max_se
             logger.info("Writing example %d of %d" % (ex_index, len(examples)))
         option_features = []
         for option in example.options:
-            context_tokens = tokenizer.tokenize(option['segment1'] + tokenizer.eos_token)
-            option_tokens = tokenizer.tokenize(tokenizer.pad_token + option['segment2'] + tokenizer.eos_token)
+            context_tokens = tokenizer.tokenize(option['segment1'] + 'extra_id_0')
+            option_tokens = tokenizer.tokenize(option['segment2'] + tokenizer.eos_token)
 
             #encoder inputs
             encoder_tokens = context_tokens
@@ -541,7 +541,7 @@ def convert_qa_examples_to_partial_scoring_features(examples, label_list, max_se
             decoder_input_ids = tokenizer.convert_tokens_to_ids(decoder_tokens)
             decoder_attention_mask = [1 if mask_padding_with_zero else 0] * len(decoder_input_ids)
             padding_length = max_seq_length - len(decoder_input_ids)
-            decoder_input_ids = decoder_input_ids + ([pad_token] * padding_length)
+            decoder_input_ids = decoder_input_ids + ([0] * padding_length)
             decoder_attention_mask = decoder_attention_mask + ([0 if mask_padding_with_zero else 1] * padding_length)
             
             assert len(encoder_input_ids) == max_seq_length
@@ -556,7 +556,7 @@ def convert_qa_examples_to_partial_scoring_features(examples, label_list, max_se
 
         label_id = label_map[example.label]
 
-        if ex_index < 1:
+        if ex_index < 5:
             # print(str(encoder_tokens).encode('utf8'), str(encoder_input_ids).encode('utf8'), str(encoder_attention_mask).encode('utf8') ,str(decoder_tokens).encode('utf8'), str(decoder_input_ids).encode('utf8'), str(decoder_attention_mask).encode('utf8'), label_id, sep='\n')
             logger.info("*** Example ***")
             logger.info(f"example_id: {example.guid}")
