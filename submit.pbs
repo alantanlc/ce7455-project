@@ -3,9 +3,9 @@
 #PBS -l select=1:ncpus=1:mem=96G:ngpus=1:ompthreads=16
 #PBS -l walltime=24:00:00
 #PBS -j oe
-#PBS -N winogrande
+#PBS -N t5-small_m
 #PBS -P Personal
 cd ~
 module load singularity/latest
 cd winogrande
-singularity exec ~/scratch/pyt_winogrande.simg bash sample_training_gpt.sh xl 
+singularity exec ~/scratch/pyt_winogrande_new.simg bash sample_training_t5.sh t5-small m

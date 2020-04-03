@@ -14,8 +14,8 @@ CUDA_VISIBLE_DEVICES=0 python ./scripts/run_experiment_t5.py \
 --data_dir ./data \
 --max_seq_length 100 \
 --per_gpu_eval_batch_size 8 \
---per_gpu_train_batch_size 8 \
---gradient_accumulation_steps 8 \
+--per_gpu_train_batch_size 1 \
+--gradient_accumulation_steps 1 \
 --learning_rate 1e-3 \
 --num_train_epochs 10 \
 --output_dir $OUTPUT_DIR \
@@ -27,7 +27,7 @@ CUDA_VISIBLE_DEVICES=0 python ./scripts/run_experiment_t5.py \
 --warmup_pct 0.1 \
 --overwrite_output_dir \
 --evaluate_during_training \
-# --save_mem \
+--save_mem \
 # --fp16 \
-# --fp16_opt_level O0
+# --fp16_opt_level O1
 

@@ -149,13 +149,9 @@ def train(args, train_dataset, model, tokenizer):
                       'attention_mask': batch[1][torch.arange(batch[2].shape[0]),batch[4],:],
                       'decoder_attention_mask': batch[3][torch.arange(batch[2].shape[0]),batch[4],:],
                       'lm_labels':    batch[2][torch.arange(batch[2].shape[0]),batch[4],:],
-                      'eos_token_id': tokenizer.eos_token_id}
-            
-            if args.save_mem:          
-                outputs = checkpoint(model, inputs)
-            else:
-                outputs = model(inputs)
-                
+                      'eos_token_id': tokenizer.eos_token_id}            
+
+            outputs = model(inputs)
                 
             loss, logits = outputs[:2]
             
@@ -279,11 +275,7 @@ def evaluate(args, model, tokenizer, processor, prefix="", eval_split=None, chec
                           'labels': labels,
                           'eos_token_id': tokenizer.eos_token_id}
                 
-                    
-                if args.save_mem:          
-                    outputs = checkpoint(model, inputs)
-                else:
-                    outputs = model(inputs)
+                outputs = model(inputs)
                     
                 tmp_eval_loss, logits = outputs[:2]
                 
@@ -558,6 +550,7 @@ def main():
     tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name if args.tokenizer_name else args.model_name_or_path, do_lower_case=args.do_lower_case)
     # tokenizer.add_special_tokens(SPECIAL_TOKENS)
     config.max_seq_len = args.max_seq_length
+    config.save_mem = args.save_mem
     model = model_class.from_pretrained(args.model_name_or_path, from_tf=bool('.ckpt' in args.model_name_or_path), config=config)
     # model.resize_token_embeddings(len(tokenizer))
     if args.local_rank == 0:

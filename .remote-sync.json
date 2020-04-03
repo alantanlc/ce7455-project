@@ -13,9 +13,9 @@
     "data/*.lst",
     "data/*.jsonl"
   ],
-  "username": "andr0081",
+  "username": "gohw0058",
   "watch": [],
   "transport": "scp",
   "hostname": "ntu.nscc.sg",
-  "keyfile": "/Users/andrew/.ssh/andr0081_rsa"
+  "keyfile": "/Users/andrew/.ssh/gohw0058_rsa"
 }

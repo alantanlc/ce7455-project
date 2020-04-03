@@ -2,6 +2,9 @@ from transformers import T5PreTrainedModel, T5Config, \
     T5_PRETRAINED_MODEL_ARCHIVE_MAP, T5Model, T5ForConditionalGeneration
 from torch.nn import CrossEntropyLoss, Linear
 import torch
+import torch.nn as nn
+from torch.utils.checkpoint import checkpoint, checkpoint_sequential
+
 
 class T5ForMultipleChoice(T5PreTrainedModel):
     config_class = T5Config
@@ -10,8 +13,13 @@ class T5ForMultipleChoice(T5PreTrainedModel):
 
     def __init__(self, config):
         super().__init__(config)
-
+        
+        self.save_mem = config.save_mem
         self.t5 = T5ForConditionalGeneration(config)
+        if self.save_mem:
+            self.dummy_tensor = torch.ones(1, dtype=torch.float32, requires_grad=True)
+            self.t5_wrapped = ModuleWrapperIgnores2ndArg(self.t5)
+        
         #choose to use hidden states or softmaxed values for classification? currently softmaxed_values
         # self.classifier = Linear(int((config.max_seq_len/2)-1), 1)
  
@@ -23,6 +31,7 @@ class T5ForMultipleChoice(T5PreTrainedModel):
         labels = kwargs.pop('labels', None)
         lm_labels = kwargs.pop('lm_labels', None)
         eos_token_id = kwargs.pop('eos_token_id')
+    
         
         if lm_labels is not None: #if no mcq labels, do causal language modeling training model
             bs, seq_len = kwargs['input_ids'].shape
@@ -37,7 +46,15 @@ class T5ForMultipleChoice(T5PreTrainedModel):
             # print('decoder_attention_mask', kwargs['decoder_attention_mask'])
             # print('lm_labels', lm_labels)
             # input()
-            outputs = self.t5(input_ids=kwargs['input_ids'], attention_mask=kwargs['attention_mask'], \
+            if self.save_mem:
+                outputs = checkpoint(self.t5_wrapped, kwargs['input_ids'], kwargs['attention_mask'],\
+                                 decoder_input_ids , kwargs['decoder_attention_mask'], lm_labels, self.dummy_tensor)
+                # loss_fct = CrossEntropyLoss(ignore_index=-100)
+                # loss = loss_fct(outputs[0].view(-1, outputs[0].size(-1)), lm_labels.view(-1))
+                # outputs = (loss,) + outputs  
+
+            else:
+                outputs = self.t5(input_ids=kwargs['input_ids'], attention_mask=kwargs['attention_mask'], \
                                  decoder_input_ids=decoder_input_ids ,decoder_attention_mask=kwargs['decoder_attention_mask'], \
                                 lm_labels=lm_labels)
             return outputs
@@ -77,3 +94,14 @@ class T5ForMultipleChoice(T5PreTrainedModel):
         return outputs  # (loss), reshaped_logits, (hidden_states), (attentions)
 
 
+
+class ModuleWrapperIgnores2ndArg(nn.Module):
+    def __init__(self, module):
+        super().__init__()
+        self.module = module
+
+    def forward(self, input_ids, attention_mask, decoder_input_ids, decoder_attention_mask, lm_labels, dummy_arg=None):
+        assert dummy_arg is not None
+        x = self.module(input_ids=input_ids, attention_mask=attention_mask,\
+                decoder_input_ids=decoder_input_ids, decoder_attention_mask=decoder_attention_mask, lm_labels=lm_labels)
+        return x

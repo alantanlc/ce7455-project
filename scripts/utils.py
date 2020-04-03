@@ -524,7 +524,8 @@ def convert_qa_examples_to_partial_scoring_features(examples, label_list, max_se
             logger.info("Writing example %d of %d" % (ex_index, len(examples)))
         option_features = []
         for option in example.options:
-            context_tokens = tokenizer.tokenize(option['segment1'] + 'extra_id_0')
+            # context_tokens = tokenizer.tokenize(option['segment1'] + '<extra_id_0>')
+            context_tokens = tokenizer.tokenize(option['segment1'] )
             option_tokens = tokenizer.tokenize(option['segment2'] + tokenizer.eos_token)
 
             #encoder inputs
