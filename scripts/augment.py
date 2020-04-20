@@ -9,8 +9,8 @@ from nltk.corpus import wordnet
 from nltk.tokenize import word_tokenize
 import random
 
-INPUT_DATA_DIR = '../data'
-OUTPUT_DATA_DIR = '../data_wordnet'
+INPUT_DATA_DIR = './data'
+OUTPUT_DATA_DIR = './data_wordnet'
 TRAIN_FILE_NAME = 'train_*.jsonl'
 
 def augment_sample(sample, n):
@@ -47,7 +47,7 @@ def get_synonyms(word):
   for syn in wordnet.synsets(word):
     for l in syn.lemmas():
       synonym = l.name().replace('_', ' ').replace('-', ' ').lower()
-      synonym = ''.join([char for char in synonym if char in ' qwertyuiopasdfghjklzxcvbnm'])
+      # synonym = ''.join([char for char in synonym if char in ' qwertyuiopasdfghjklzxcvbnm'])
       synonyms.add(synonym)
   if word in synonyms:
     synonyms.remove(word)
