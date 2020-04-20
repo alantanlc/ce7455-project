@@ -3,11 +3,12 @@ import json
 import glob
 import os
 import shutil
+import random
 
 import nltk
 from nltk.corpus import wordnet
 from nltk.tokenize import word_tokenize
-import random
+from nltk.wsd import lesk
 
 INPUT_DATA_DIR = './data'
 OUTPUT_DATA_DIR = './data_wordnet'
@@ -30,7 +31,14 @@ def augment_sample(sample, n):
   random.shuffle(random_token_list)
   num_replaced = 0
   for random_token in random_token_list:
-    synonyms = get_synonyms(random_token)
+
+    # Get synonym by word sense disambiguation
+    synonyms = get_wsd_synonyms(sample['sentence'], random_token)
+
+    # Get all possible synonyms if WSD fails
+    if len(synonyms) == 0:
+      synonyms = get_synonyms(random_token)
+
     if len(synonyms) >= 1:
       synonym = random.choice(list(synonyms))
       new_tokens = [synonym if token == random_token else token for token in new_tokens.copy()]
@@ -51,6 +59,17 @@ def get_synonyms(word):
       synonyms.add(synonym)
   if word in synonyms:
     synonyms.remove(word)
+  return list(synonyms)
+
+def get_wsd_synonyms(sentence, word):
+  synonyms = set()
+  syn = lesk(sentence, word)
+  if syn:
+    for l in syn.lemmas():
+      synonym = l.name().replace('_', ' ').replace('-', ' ').lower()
+      synonyms.add(synonym)
+    if word in synonyms:
+      synonyms.remove(word)
   return list(synonyms)
 
 def main():
@@ -88,7 +107,7 @@ def main():
       augmented_data.append(d_aug)
 
     # Write data to file in 'data_wordnet' folder
-    with open(os.path.join(args.output_data_dir, file), 'w') as f:
+    with open(os.path.join(args.output_data_dir, file), 'a') as f:
       for d in augmented_data:
         f.write(json.dumps(d) + '\n')
 
