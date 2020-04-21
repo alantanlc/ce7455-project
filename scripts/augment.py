@@ -147,7 +147,7 @@ def main():
     #   d_aug = augment_sample(d, args.n_words)
     #   augmented_data.append(d_aug)
     for i in range(len(data)//2):
-      d_aug_1, d_aug_2 = augment_pair(data[i], data[i+1], args.n_words)
+      d_aug_1, d_aug_2 = augment_pair(data[i*2], data[i*2+1], args.n_words)
       augmented_data.append(d_aug_1)
       augmented_data.append(d_aug_2)
 
