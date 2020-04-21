@@ -9,6 +9,10 @@ from nltk.corpus import wordnet
 from nltk.tokenize import word_tokenize
 import random
 
+nltk.download('punkt')
+nltk.download('averaged_perceptron_tagger')
+nltk.download('wordnet')
+
 INPUT_DATA_DIR = './data'
 OUTPUT_DATA_DIR = './data_wordnet'
 TRAIN_FILE_NAME = 'train_*.jsonl'
@@ -88,7 +92,7 @@ def main():
       augmented_data.append(d_aug)
 
     # Write data to file in 'data_wordnet' folder
-    with open(os.path.join(args.output_data_dir, file), 'w') as f:
+    with open(os.path.join(args.output_data_dir, file), 'a') as f:
       for d in augmented_data:
         f.write(json.dumps(d) + '\n')
 
