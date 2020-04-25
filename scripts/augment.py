@@ -14,6 +14,40 @@ INPUT_DATA_DIR = './data'
 OUTPUT_DATA_DIR = './data_wordnet'
 TRAIN_FILE_NAME = 'train_*.jsonl'
 
+def swap_options(sample):
+  # Swap Operation 1: Swap values of option1 and option2 keys, and swap answer label
+  sample1 = sample.copy()
+  sample1["option1"], sample1["option2"] = sample1["option2"], sample1["option1"]
+  sample1["answer"] = "1" if sample1["answer"] == "2" else "2"
+
+  # Swap Operation 2: Swap option1 and option2 in sentence, and swap answer label
+  sample2 = sample.copy()
+  new_sentence = []
+  for word in sample["sentence"].split(' '):
+    if str.find(word, sample["option1"]) > -1:
+      new_sentence.append(str.replace(word, sample["option1"], sample["option2"]))
+    elif str.find(word, sample["option2"]) > -1:
+      new_sentence.append(str.replace(word, sample["option2"], sample["option1"]))
+    else:
+      new_sentence.append(word)
+  sample2["sentence"] = " ".join(new_sentence)
+  sample2["answer"] = "1" if sample2["answer"] == "2" else "2"
+
+  # Swap Operation 3: Swap option1 and option2 in sentence, swap values of option1 and option2 keys, and swap answer label
+  sample3 = sample.copy()
+  new_sentence = []
+  for word in sample["sentence"].split(' '):
+    if str.find(word, sample["option1"]) > -1:
+      new_sentence.append(str.replace(word, sample["option1"], sample["option2"]))
+    elif str.find(word, sample["option2"]) > -1:
+      new_sentence.append(str.replace(word, sample["option2"], sample["option1"]))
+    else:
+      new_sentence.append(word)
+  sample3["sentence"] = " ".join(new_sentence)
+  sample3["option1"], sample3["option2"] = sample3["option2"], sample3["option1"]
+
+  return sample1, sample2, sample3
+
 def augment_sample(sample, n):
   sample = sample.copy()
   new_tokens = word_tokenize(sample['sentence'])
@@ -143,13 +177,24 @@ def main():
 
     # Augment each sample
     augmented_data = []
+
+    # Method 1: Replace one word in each sentence randomly
     # for d in data:
     #   d_aug = augment_sample(d, args.n_words)
     #   augmented_data.append(d_aug)
-    for i in range(len(data)//2):
-      d_aug_1, d_aug_2 = augment_pair(data[i*2], data[i*2+1], args.n_words)
-      augmented_data.append(d_aug_1)
-      augmented_data.append(d_aug_2)
+
+    # Method 2: Replace the same word in each pair of twin sentence randomly
+    # for i in range(len(data)//2):
+    #   d_aug_1, d_aug_2 = augment_pair(data[i*2], data[i*2+1], args.n_words)
+    #   augmented_data.append(d_aug_1)
+    #   augmented_data.append(d_aug_2)
+
+    # Method 3: Perform 4 swap operations to each sentence
+    for i, d in enumerate(data):
+      d_swapped_1, d_swapped_2, d_swapped_3 = swap_options(d)
+      augmented_data.append(d_swapped_1)
+      augmented_data.append(d_swapped_2)
+      augmented_data.append(d_swapped_3)
 
     # Write data to file in 'data_wordnet' folder
     with open(os.path.join(args.output_data_dir, file), 'a') as f:
