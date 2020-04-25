@@ -10,6 +10,10 @@ from nltk.corpus import wordnet
 from nltk.tokenize import word_tokenize
 from nltk.wsd import lesk
 
+nltk.download('punkt')
+nltk.download('averaged_perceptron_tagger')
+nltk.download('wordnet')
+
 INPUT_DATA_DIR = './data'
 OUTPUT_DATA_DIR = './data_wordnet'
 TRAIN_FILE_NAME = 'train_*.jsonl'
