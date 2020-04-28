@@ -37,7 +37,7 @@ def swap_options(sample):
   sample2["sentence"] = " ".join(new_sentence)
   sample2["answer"] = "1" if sample2["answer"] == "2" else "2"
 
-  # Swap Operation 3: Swap option1 and option2 in sentence, swap values of option1 and option2 keys, and swap answer label
+  # Swap Operation 3: Swap option1 and option2 in sentence, swap values of option1 and option2 keys
   sample3 = sample.copy()
   new_sentence = []
   for word in sample["sentence"].split(' '):
@@ -89,7 +89,7 @@ def augment_sample(sample, n):
   return sample
 
 def augment_pair(sample_1, sample_2, n):
-  sample_1 = sample_2.copy()
+  sample_1 = sample_1.copy()
   sample_2 = sample_2.copy()
   new_tokens_1 = word_tokenize(sample_1['sentence'])
   new_tokens_2 = word_tokenize(sample_2['sentence'])
@@ -108,7 +108,7 @@ def augment_pair(sample_1, sample_2, n):
   num_replaced = 0
   for random_token in random_token_list:
     # Only replace words that exist in both sentence 1 and sentence 2 and are in the same position
-    if new_tokens_1.index(random_token) == new_tokens_2.index(random_token):
+    if random_token in new_tokens_1 and random_token in new_tokens_2 and new_tokens_1.index(random_token) == new_tokens_2.index(random_token):
       # Get synonym by word sense disambiguation
       synonyms = get_wsd_synonyms(sample_1['sentence'], random_token)
 
@@ -188,17 +188,17 @@ def main():
     #   augmented_data.append(d_aug)
 
     # Method 2: Replace the same word in each pair of twin sentence randomly
-    # for i in range(len(data)//2):
-    #   d_aug_1, d_aug_2 = augment_pair(data[i*2], data[i*2+1], args.n_words)
-    #   augmented_data.append(d_aug_1)
-    #   augmented_data.append(d_aug_2)
+    for i in range(len(data)//2):
+      d_aug_1, d_aug_2 = augment_pair(data[i*2], data[i*2+1], args.n_words)
+      augmented_data.append(d_aug_1)
+      augmented_data.append(d_aug_2)
 
     # Method 3: Perform 4 swap operations to each sentence
-    for i, d in enumerate(data):
-      d_swapped_1, d_swapped_2, d_swapped_3 = swap_options(d)
-      augmented_data.append(d_swapped_1)
-      augmented_data.append(d_swapped_2)
-      augmented_data.append(d_swapped_3)
+    # for i, d in enumerate(data):
+    #   d_swapped_1, d_swapped_2, d_swapped_3 = swap_options(d)
+    #   augmented_data.append(d_swapped_1)
+    #   augmented_data.append(d_swapped_2)
+    #   augmented_data.append(d_swapped_3)
 
     # Write data to file in 'data_wordnet' folder
     with open(os.path.join(args.output_data_dir, file), 'a') as f:
