@@ -15,10 +15,13 @@ class T5ForMultipleChoice(T5PreTrainedModel):
         super().__init__(config)
         
         self.save_mem = config.save_mem
-        self.t5 = T5ForConditionalGeneration(config)
+        # self.t5 = T5ForConditionalGeneration(config)
         if self.save_mem:
             self.dummy_tensor = torch.ones(1, dtype=torch.float32, requires_grad=True)
-            self.t5_wrapped = ModuleWrapperIgnores2ndArg(self.t5)
+            self.t5_wrapped = ModuleWrapperIgnores2ndArg(T5ForConditionalGeneration(config))
+        else:
+            self.t5 = self.t5_wrapped = T5ForConditionalGeneration(config)
+            
         
         #choose to use hidden states or softmaxed values for classification? currently softmaxed_values
         # self.classifier = Linear(int((config.max_seq_len/2)-1), 1)
@@ -69,7 +72,11 @@ class T5ForMultipleChoice(T5PreTrainedModel):
         kwargs['decoder_input_ids'] = self._shift_right(kwargs['decoder_input_ids'])
         kwargs['decoder_attention_mask'][:,1:] = kwargs['decoder_attention_mask'][:,:-1].clone()
         kwargs['decoder_attention_mask'][:,0] = 1
-        decoder_outputs,encoder_outputs = self.t5(input_ids=kwargs['input_ids'], attention_mask=kwargs['attention_mask'],\
+        if self.save_mem:
+            decoder_outputs,encoder_outputs = checkpoint(self.t5_wrapped, kwargs['input_ids'], kwargs['attention_mask'],\
+                             kwargs['decoder_input_ids'] , kwargs['decoder_attention_mask'], None, self.dummy_tensor)
+        else:
+            decoder_outputs,encoder_outputs = self.t5(input_ids=kwargs['input_ids'], attention_mask=kwargs['attention_mask'],\
                                 decoder_input_ids=kwargs['decoder_input_ids'], decoder_attention_mask=kwargs['decoder_attention_mask'])
         
         

@@ -70,6 +70,20 @@ def set_seed(args):
     if args.n_gpu > 0:
         torch.cuda.manual_seed_all(args.seed)
 
+def prepare_inputs_for_lm(batch, tokenizer):
+    return {'input_ids':      batch[0][torch.arange(batch[2].shape[0]),batch[4],:],
+              'attention_mask': batch[1][torch.arange(batch[2].shape[0]),batch[4],:],
+              'decoder_attention_mask': batch[3][torch.arange(batch[2].shape[0]),batch[4],:],
+              'lm_labels':    batch[2][torch.arange(batch[2].shape[0]),batch[4],:],
+              'eos_token_id': tokenizer.eos_token_id}
+
+def prepare_inputs_for_mcq(batch,tokenizer):
+    return {'input_ids':      batch[0],
+              'attention_mask': batch[1],
+              'decoder_input_ids':    batch[2],
+              'decoder_attention_mask':  batch[3],
+              'labels': batch[4],
+              'eos_token_id': tokenizer.eos_token_id}
 
 def train(args, train_dataset, model, tokenizer):
     """ Train the model """
@@ -145,11 +159,10 @@ def train(args, train_dataset, model, tokenizer):
             model.train()
             batch = tuple(t.to(args.device) for t in batch)
             
-            inputs = {'input_ids':      batch[0][torch.arange(batch[2].shape[0]),batch[4],:],
-                      'attention_mask': batch[1][torch.arange(batch[2].shape[0]),batch[4],:],
-                      'decoder_attention_mask': batch[3][torch.arange(batch[2].shape[0]),batch[4],:],
-                      'lm_labels':    batch[2][torch.arange(batch[2].shape[0]),batch[4],:],
-                      'eos_token_id': tokenizer.eos_token_id}            
+            if step % args.multi_task_perc == 0:
+                inputs = prepare_inputs_for_mcq(batch, tokenizer)         
+            else:
+                inputs = prepare_inputs_for_lm(batch, tokenizer)         
 
             outputs = model(inputs)
                 
@@ -236,8 +249,8 @@ def evaluate(args, model, tokenizer, processor, prefix="", eval_split=None, chec
     assert eval_split is not None
 
     results = {}
-    if os.path.exists("/output/metrics.json"):
-        with open("/output/metrics.json", "r") as f:
+    if os.path.exists("output/metrics.json"):
+        with open("output/metrics.json", "r") as f:
             existing_results = json.loads(f.read())
         f.close()
         results.update(existing_results)
@@ -268,12 +281,7 @@ def evaluate(args, model, tokenizer, processor, prefix="", eval_split=None, chec
 
             with torch.no_grad():
                 labels= batch[4]
-                inputs = {'input_ids':      batch[0],
-                          'attention_mask': batch[1],
-                          'decoder_input_ids':    batch[2],
-                          'decoder_attention_mask':  batch[3],
-                          'labels': labels,
-                          'eos_token_id': tokenizer.eos_token_id}
+                inputs = prepare_inputs_for_mcq(batch, tokenizer)
                 
                 outputs = model(inputs)
                     
@@ -316,18 +324,22 @@ def evaluate(args, model, tokenizer, processor, prefix="", eval_split=None, chec
             output_pred_file = os.path.join(eval_output_dir,"predictions_{}.lst".format(eval_split))
         with open(output_pred_file, "w") as writer:
             logger.info("***** Write predictions {} on {} *****".format(prefix, eval_split))
-            tmp = []
-            for i, pred in enumerate(preds):
-                context = tokenizer.decode(eval_dataset[i][0][0], skip_special_tokens=True).encode('utf-8')
-                op1 = tokenizer.decode(eval_dataset[i][2][0], skip_special_tokens=True).encode('utf-8')
-                op2 = tokenizer.decode(eval_dataset[i][2][1], skip_special_tokens=True).encode('utf-8')
-                label = eval_dataset[i][4]
-                tmp.append(pred)
-                writer.write(f'\n{context} \toption1: {op1} \toption2: {op2} \tpredicted: {pred} correct: {label}\n')
-            writer.write(str(Counter(tmp)))
-            writer.write("%s = %s\n" % (key, str(result_split[key])))
-        if os.path.exists("/output/"):
-            with open("/output/metrics.json", "w") as f:
+            if eval_split == 'test':
+                for pred in preds:
+                    writer.write("{}\n".format(processor.get_labels()[pred]))
+            else:
+                tmp = []
+                for i, pred in enumerate(preds):
+                    context = tokenizer.decode(eval_dataset[i][0][0], skip_special_tokens=True).encode('utf-8')
+                    op1 = tokenizer.decode(eval_dataset[i][2][0], skip_special_tokens=True).encode('utf-8')
+                    op2 = tokenizer.decode(eval_dataset[i][2][1], skip_special_tokens=True).encode('utf-8')
+                    label = eval_dataset[i][4]
+                    tmp.append(pred)
+                    writer.write(f'\n{context} \toption1: {op1} \toption2: {op2} \tpredicted: {pred} correct: {label}\n')
+                writer.write(str(Counter(tmp)))
+                writer.write("%s = %s\n" % (key, str(result_split[key])))
+        if os.path.exists("output/"):
+            with open("output/metrics.json", "w") as f:
                 f.write(json.dumps(results))
             f.close()
 
@@ -466,6 +478,8 @@ def main():
                         help="Linear warmup over warmup_steps.")
     parser.add_argument("--warmup_pct", default=0.1, type=float,
                         help="Linear warmup over warmup_pct*total_steps.")
+    parser.add_argument("--multi_task_perc", default=999999999999999999999, type=float, #set high to default to no multitask
+                        help="every % step == 0, will train on mcq instead of lm")
 
     parser.add_argument('--logging_steps', type=int, default=50,
                         help="Log every X updates steps.")
